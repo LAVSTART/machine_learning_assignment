@@ -1,0 +1,53 @@
+# msd_calc.py
+import MDAnalysis as mda
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+
+def compute_msd(universe, selstr, max_lag_fraction=0.5):
+    atoms = universe.select_atoms(selstr)
+    n_atoms = len(atoms)
+    n_frames = len(universe.trajectory)
+    # load all positions (n_frames, n_atoms, 3)
+    pos = np.zeros((n_frames, n_atoms, 3))
+    for i, ts in enumerate(universe.trajectory):
+        pos[i] = atoms.positions.copy()
+    # compute MSD vs lag time (ensemble-averaged)
+    max_lag = int(n_frames * max_lag_fraction)
+    msd = np.zeros(max_lag)
+    counts = np.zeros(max_lag)
+    for lag in tqdm(range(1, max_lag)):
+        diffs = pos[lag:] - pos[:-lag]  # shape (n_frames-lag, n_atoms, 3)
+        sq = (diffs**2).sum(axis=2)     # (n_frames-lag, n_atoms)
+        msd[lag] = sq.mean()
+        counts[lag] = sq.size
+    times = np.arange(n_frames) * universe.trajectory.dt  # dt in ps if set; else frame index units
+    return times[:max_lag], msd[:max_lag]
+
+def fit_diffusion(times, msd, tmin_index=None, tmax_index=None, dim=3):
+    # linear fit msd = slope * t + intercept. D = slope / (2*dim)
+    if tmin_index is None:
+        tmin_index = int(len(times) * 0.1)
+    if tmax_index is None:
+        tmax_index = -1
+    tsel = times[tmin_index:tmax_index]
+    msdsel = msd[tmin_index:tmax_index]
+    coeffs = np.polyfit(tsel, msdsel, 1)
+    slope = coeffs[0]
+    intercept = coeffs[1]
+    D = slope / (2 * dim)
+    return slope, intercept, D
+
+if __name__ == "__main__":
+    # Example usage
+    u = mda.Universe("datafile.data", "dump.xyz")  # or "dump.lammpstrj"
+    # make sure universe.trajectory.dt is correctly set if frames are in fs or ps.
+    times, msd = compute_msd(u, "name O")  # e.g., compute for oxygen
+    slope, intercept, D = fit_diffusion(times, msd)
+    print(f"D (units of length^2/time) = {D}")
+    plt.plot(times, msd, label='MSD')
+    plt.plot(times, np.polyval([slope, intercept], times), '--', label='linear fit')
+    plt.xlabel("Time (frames*dt)")
+    plt.ylabel("MSD (units^2)")
+    plt.legend(); plt.show()

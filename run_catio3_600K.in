@@ -1,0 +1,59 @@
+# ---------- LAMMPS Input Script for CaTiO3 ----------
+# Units, boundary, and atom style
+units           metal
+dimension       3
+boundary        p p p
+atom_style      charge
+
+# ---------- Read structure ----------
+read_data       catio3_supercell_charge.data
+
+# ---------- Force field ----------
+pair_style      buck/coul/long 10.0
+kspace_style    pppm 1.0e-4
+
+# Buckingham parameters (literature example: adjust if you have better data)
+# pair_coeff <type1> <type2> A rho C
+pair_coeff      1 1  0.0     1.0     0.0        # Ca-Ca
+pair_coeff      2 2  0.0     1.0     0.0        # Ti-Ti
+pair_coeff      3 3  22764.0 0.1490  27.88      # O-O
+pair_coeff      1 3  955.0   0.312   0.0        # Ca-O
+pair_coeff      2 3  1020.0  0.210   0.0        # Ti-O
+pair_coeff      1 2  0.0     1.0     0.0        # Ca-Ti
+
+# ---------- Masses ----------
+mass 1 40.078   # Ca
+mass 2 47.867   # Ti
+mass 3 15.999   # O
+
+# ---------- Neighbor and timestep ----------
+neighbor        2.0 bin
+neigh_modify    delay 2 every 1
+timestep        0.001  # small for stability during equilibration
+
+# ---------- Minimization ----------
+thermo          100
+thermo_style    custom step temp pe etotal press
+min_style       cg
+minimize        1e-6 1e-8 10000 100000
+
+# ---------- Equilibration (NVT) ----------
+reset_timestep  0
+velocity        all create 600 12345 mom yes rot yes dist gaussian
+fix             1 all nvt temp 600 600 0.1
+dump            1 all custom 100 traj_eq.lammpstrj id type x y z
+thermo          100
+run             20000
+unfix           1
+undump          1
+
+# ---------- Production (NPT) ----------
+fix             2 all npt temp 600 600 0.1 iso 0.0 0.0 1.0
+dump            2 all custom 500 traj_prod.lammpstrj id type x y z
+thermo          500
+run             50000
+
+write_restart   catio3_final.rst
+
+print "Simulation completed successfully!"
+
